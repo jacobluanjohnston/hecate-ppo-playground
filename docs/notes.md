@@ -57,23 +57,41 @@ M1/M2 stays a 2x64 MLP. (The lab's GRPO thread is the one where the trained poli
 
 ## 5. The router's contract
 
-Observation, 13 floats, in this order:
-advisor: difficulty, progress, stuckness, confidence (a frozen LLM's judgments, 0..1);
-telemetry: steps_used, failed_commands, error_repetition, test_delta (-1..1), no_progress_steps (counted from
-tool events, no LLM);
-cost: cost_fraction (spend / C_ref, may exceed 1), context_utilization;
-session: current_model (0 = M1, 1 = M2);
-mask: test_observed (1 if tests ran; 0 means test_delta is unknown, not zero).
+**Observation — 13 floats, in this order**
 
-Action: 0 = run the next interval (~5 tool calls) on M1 (cheap), 1 = on M2 (strong). V1 is one-way: once on
-M2, stay on M2.
+| # | group | name | meaning | range |
+|---|---|---|---|---|
+| 0 | advisor (frozen LLM, JSON) | difficulty | how hard the remaining work looks | 0..1 |
+| 1 | advisor | progress | how far along the task seems | 0..1 |
+| 2 | advisor | stuckness | trapped in an unproductive loop? | 0..1 |
+| 3 | advisor | confidence | how sure the advisor is of its scores | 0..1 |
+| 4 | telemetry (counted, no LLM) | steps_used | tool interactions used / budget | 0..1 |
+| 5 | telemetry | failed_commands | share of recent commands that failed | 0..1 |
+| 6 | telemetry | error_repetition | same error message recurring | 0..1 |
+| 7 | telemetry | test_delta | change in test results since last checkpoint | −1..1 |
+| 8 | telemetry | no_progress_steps | intervals since anything improved / budget | 0..1 |
+| 9 | cost ledger | cost_fraction | spend so far / C_ref | may exceed 1 |
+| 10 | cost ledger | context_utilization | how full the model's context window is | 0..1 |
+| 11 | session | current_model | 0 = M1, 1 = M2 | {0, 1} |
+| 12 | mask | test_observed | 1 if tests ran; 0 = test_delta is unknown, not zero | {0, 1} |
 
-Reward: total = 1[resolved] - lambda * C_total / C_ref, paid incrementally: each interval
--lambda * (that interval's cost) / C_ref, plus 1 on the interval the task resolves. C_ref = budget x M1 price
-= 12 x 1.0 = 12 (fixed, so hard tasks are not graded on a curve). With lambda = 0.5: M1 interval -0.042,
-M2 interval -0.167; easy task on M1 in 4 intervals +0.83; any task on M2 in 3 intervals +0.50; hard task
-burned on M1 for 12 intervals -0.50. lambda is the exchange rate between cost and success; without the cost
-term the policy learns always-M2, without the success term always-M1.
+**Action** — `Discrete(2)`: 0 = run the next interval (~5 tool calls) on M1 (cheap); 1 = on M2 (strong).
+V1 is one-way: once on M2, stay on M2.
+
+**Reward** — per task: `1[resolved] − λ · C_total / C_ref`, paid as you go:
+- each interval: `−λ · (that interval's cost) / C_ref`
+- the interval the task resolves: `+1`
+- `C_ref` = budget × M1 price = 12 × 1.0 = 12, fixed, so hard tasks are not graded on a curve
+- λ is the exchange rate between cost and success: no cost term → always-M2; no success term → always-M1
+- λ is a design decision, not a constant from the paper. On the real router it has to be chosen by the same sweep as A2, with real costs.
+
+| with λ = 0.5 | score |
+|---|---|
+| one M1 interval | −0.042 |
+| one M2 interval | −0.167 |
+| easy task, M1, solved in 4 intervals | +0.83 |
+| any task, M2, solved in 3 intervals | +0.50 |
+| hard task, M1 for all 12 intervals, unsolved | −0.50 |
 
 ## Sources
 
